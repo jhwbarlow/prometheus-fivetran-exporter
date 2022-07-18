@@ -1,6 +1,7 @@
 package connector
 
 import (
+	"github.com/jhwbarlow/prometheus-fivetran-exporter/pkg/connector"
 	"github.com/jhwbarlow/prometheus-fivetran-exporter/pkg/resp"
 )
 
@@ -65,7 +66,7 @@ type DescribeConnectorResp struct {
 type DescribeConnectorRespData struct {
 	ID      string
 	GroupID string `json:"group_id"`
-    Service string
+	Service string
 	Paused  bool
 	Status  Status
 }
@@ -86,10 +87,10 @@ type DescribeConnectorRespData struct {
 }
 */
 type Status struct {
-	SetupState       SetupState  `json:"setup_state"`
-	SyncState        SyncState   `json:"sync_state"`
-	UpdateState      UpdateState `json:"update_state"`
-	IsHistoricalSync bool        `json:"is_historical_sync"`
+	SetupState       connector.SetupState  `json:"setup_state"`
+	SyncState        connector.SyncState   `json:"sync_state"`
+	UpdateState      connector.UpdateState `json:"update_state"`
+	IsHistoricalSync bool                  `json:"is_historical_sync"`
 	Tasks            []Task
 	Warnings         []Warning
 }

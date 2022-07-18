@@ -1,4 +1,4 @@
-package group
+package connector
 
 import (
 	"bytes"
@@ -11,21 +11,28 @@ import (
 	"time"
 
 	"github.com/jhwbarlow/prometheus-fivetran-exporter/pkg/connector"
+	groupResolver "github.com/jhwbarlow/prometheus-fivetran-exporter/pkg/resolver/group"
 	"github.com/jhwbarlow/prometheus-fivetran-exporter/pkg/resp"
 	connectorResp "github.com/jhwbarlow/prometheus-fivetran-exporter/pkg/resp/connector"
 )
 
 type Lister interface {
 	List() ([]*connector.Connector, error)
+	GroupID() string
 }
 
 type APILister struct {
+	GroupResolver groupResolver.Resolver
+
+	groupID    string
 	apiToken   string
 	httpClient *http.Client
 	url        *url.URL
 }
 
-func NewAPILister(APIKey, APISecret, APIURL, groupID string, timeout time.Duration) (*APILister, error) {
+func NewAPILister(APIKey, APISecret, APIURL, groupID string,
+	timeout time.Duration,
+	groupResolver groupResolver.Resolver) (*APILister, error) {
 	url, err := url.Parse(fmt.Sprintf("%s/v1/groups/%s/connectors?limit=1000", APIURL, groupID))
 	if err != nil {
 		return nil, fmt.Errorf("parsing API URL: %w", err)
@@ -37,9 +44,11 @@ func NewAPILister(APIKey, APISecret, APIURL, groupID string, timeout time.Durati
 	}
 
 	return &APILister{
-		url:        url,
-		apiToken:   apiToken,
-		httpClient: httpClient,
+		GroupResolver: groupResolver,
+		groupID:       groupID,
+		url:           url,
+		apiToken:      apiToken,
+		httpClient:    httpClient,
 	}, nil
 }
 
@@ -64,13 +73,17 @@ func (l *APILister) List() ([]*connector.Connector, error) {
 	if _, err := io.Copy(respBody, httpResp.Body); err != nil {
 		return nil, fmt.Errorf("copying HTTP response body: %w", err)
 	}
+	respBodyBytes := respBody.Bytes()
+	respBodyStr := string(respBodyBytes)
+
+	fmt.Printf("==>%#v\n", respBodyStr)
 
 	if err := httpResp.Body.Close(); err != nil {
 		return nil, fmt.Errorf("closing HTTP response body: %w", err)
 	}
 
 	listConnectorsResp := new(connectorResp.ListConnectorsResp)
-	if err := json.Unmarshal(respBody.Bytes(), listConnectorsResp); err != nil {
+	if err := json.Unmarshal(respBodyBytes, listConnectorsResp); err != nil {
 		return nil, fmt.Errorf("unmarshalling HTTP response body: %w", err)
 	}
 
@@ -78,16 +91,36 @@ func (l *APILister) List() ([]*connector.Connector, error) {
 		return nil, fmt.Errorf("received response code %v", listConnectorsResp.Code)
 	}
 
+	groupName, err := l.GroupResolver.ResolveIDToName(l.groupID)
+	if err != nil {
+		return nil, fmt.Errorf("resolving group ID %q to group name", l.groupID)
+	}
+
 	connectors := make([]*connector.Connector, 0, len(listConnectorsResp.Data.Items))
 	for _, item := range listConnectorsResp.Data.Items {
+		fmt.Printf("-->%#v\n", item)
 		group := &connector.Connector{
-			ID:      item.ID,
-			Name:    item.Schema,
-			Service: item.Service,
+			ID:                item.ID,
+			Name:              item.Schema,
+			GroupID:           l.groupID,
+			GroupName:         groupName,
+			Service:           item.Service,
+			Paused:            item.Paused,
+			IsHistoricalSync:  item.Status.IsHistoricalSync,
+			SyncFrequencyMins: item.SyncFrequencyMins,
+			TaskCount:         len(item.Status.Tasks),
+			WarningCount:      len(item.Status.Warnings),
+			SetupState:        item.Status.SetupState,
+			SyncState:         item.Status.SyncState,
+			UpdateState:       item.Status.UpdateState,
 		}
 
 		connectors = append(connectors, group)
 	}
 
 	return connectors, nil
+}
+
+func (l *APILister) GroupID() string {
+	return l.groupID
 }

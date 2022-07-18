@@ -1,6 +1,7 @@
 package destination
 
 import (
+	"github.com/jhwbarlow/prometheus-fivetran-exporter/pkg/destination"
 	"github.com/jhwbarlow/prometheus-fivetran-exporter/pkg/resp"
 )
 
@@ -33,6 +34,7 @@ type DescribeDestinationResp struct {
 
 type Data struct {
 	ID          string
-	GroupID     string      `json:"group_id"`
-	SetupStatus SetupStatus `json:"setup_status"`
+	GroupID     string `json:"group_id"`
+	Service     string
+	SetupStatus destination.SetupStatus `json:"setup_status"`
 }

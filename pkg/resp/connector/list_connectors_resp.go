@@ -46,9 +46,11 @@ type ListConnectorsRespData struct {
 }
 
 type ListConnectorsRespDataItem struct {
-	ID      string
-	GroupID string `json:"group_id"`
-	Service string
-	Schema  string
-	Status  Status
+	ID                string
+	GroupID           string `json:"group_id"`
+	Service           string
+	Schema            string
+	Paused            bool
+	SyncFrequencyMins int `json:"sync_frequency"`
+	Status            Status
 }
