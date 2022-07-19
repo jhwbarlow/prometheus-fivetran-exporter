@@ -41,6 +41,10 @@ type ListConnectorsResp struct {
 	Data ListConnectorsRespData
 }
 
+func (r *ListConnectorsResp) GetCode() resp.ResponseCode {
+	return r.Code
+}
+
 type ListConnectorsRespData struct {
 	Items []ListConnectorsRespDataItem
 }

@@ -1,18 +1,15 @@
 package destination
 
 import (
-	"bytes"
 	"encoding/base64"
-	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"time"
 
 	"github.com/jhwbarlow/prometheus-fivetran-exporter/pkg/destination"
+	jsonhttp "github.com/jhwbarlow/prometheus-fivetran-exporter/pkg/jsonhttp"
 	groupResolver "github.com/jhwbarlow/prometheus-fivetran-exporter/pkg/resolver/group"
-	"github.com/jhwbarlow/prometheus-fivetran-exporter/pkg/resp"
 	destinationResp "github.com/jhwbarlow/prometheus-fivetran-exporter/pkg/resp/destination"
 )
 
@@ -53,42 +50,49 @@ func NewAPIDescriber(APIKey, APISecret, APIURL, groupID string,
 }
 
 func (d *APIDescriber) Describe() (*destination.Destination, error) {
-	httpReq := &http.Request{
-		Header: make(http.Header),
-		Method: http.MethodGet,
-		URL:    d.url,
-	}
-	httpReq.Header.Add("Authorization", "Basic "+d.apiToken)
+	// httpReq := &http.Request{
+	// 	Header: make(http.Header),
+	// 	Method: http.MethodGet,
+	// 	URL:    d.url,
+	// }
+	// httpReq.Header.Add("Authorization", "Basic "+d.apiToken)
 
-	httpResp, err := d.httpClient.Do(httpReq)
+	// httpResp, err := d.httpClient.Do(httpReq)
+	// if err != nil {
+	// 	return nil, fmt.Errorf("sending HTTP GET request: %w", err)
+	// }
+
+	// if httpResp.StatusCode != http.StatusOK {
+	// 	return nil, fmt.Errorf("received HTTP status code %d", httpResp.StatusCode)
+	// }
+
+	// respBody := new(bytes.Buffer)
+	// if _, err := io.Copy(respBody, httpResp.Body); err != nil {
+	// 	return nil, fmt.Errorf("copying HTTP response body: %w", err)
+	// }
+	// respBodyBytes := respBody.Bytes()
+	// respBodyStr := string(respBodyBytes)
+
+	// fmt.Printf("==>%#v\n", respBodyStr)
+
+	// if err := httpResp.Body.Close(); err != nil {
+	// 	return nil, fmt.Errorf("closing HTTP response body: %w", err)
+	// }
+
+	// describeDestinationResp := new(destinationResp.DescribeDestinationResp)
+	// if err := json.Unmarshal(respBodyBytes, describeDestinationResp); err != nil {
+	// 	return nil, fmt.Errorf("unmarshalling HTTP response body: %w", err)
+	// }
+
+	// if describeDestinationResp.Code != resp.ResponseCodeSuccess {
+	// 	return nil, fmt.Errorf("received response code %v", describeDestinationResp.Code)
+	// }
+
+	describeDestinationResp, err := jsonhttp.UnmarshallJSONFromHTTPGet[*destinationResp.DescribeDestinationResp](d.url,
+		d.apiToken,
+		d.httpClient)
 	if err != nil {
-		return nil, fmt.Errorf("sending HTTP GET request: %w", err)
-	}
-
-	if httpResp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("received HTTP status code %d", httpResp.StatusCode)
-	}
-
-	respBody := new(bytes.Buffer)
-	if _, err := io.Copy(respBody, httpResp.Body); err != nil {
-		return nil, fmt.Errorf("copying HTTP response body: %w", err)
-	}
-	respBodyBytes := respBody.Bytes()
-	respBodyStr := string(respBodyBytes)
-
-	fmt.Printf("==>%#v\n", respBodyStr)
-
-	if err := httpResp.Body.Close(); err != nil {
-		return nil, fmt.Errorf("closing HTTP response body: %w", err)
-	}
-
-	describeDestinationResp := new(destinationResp.DescribeDestinationResp)
-	if err := json.Unmarshal(respBodyBytes, describeDestinationResp); err != nil {
-		return nil, fmt.Errorf("unmarshalling HTTP response body: %w", err)
-	}
-
-	if describeDestinationResp.Code != resp.ResponseCodeSuccess {
-		return nil, fmt.Errorf("received response code %v", describeDestinationResp.Code)
+		return nil, fmt.Errorf("getting JSON HTTP response: %w", err)
 	}
 
 	groupName, err := d.GroupResolver.ResolveIDToName(d.groupID)

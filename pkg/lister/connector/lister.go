@@ -1,18 +1,15 @@
 package connector
 
 import (
-	"bytes"
 	"encoding/base64"
-	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"time"
 
 	"github.com/jhwbarlow/prometheus-fivetran-exporter/pkg/connector"
+	jsonhttp "github.com/jhwbarlow/prometheus-fivetran-exporter/pkg/jsonhttp"
 	groupResolver "github.com/jhwbarlow/prometheus-fivetran-exporter/pkg/resolver/group"
-	"github.com/jhwbarlow/prometheus-fivetran-exporter/pkg/resp"
 	connectorResp "github.com/jhwbarlow/prometheus-fivetran-exporter/pkg/resp/connector"
 )
 
@@ -53,42 +50,51 @@ func NewAPILister(APIKey, APISecret, APIURL, groupID string,
 }
 
 func (l *APILister) List() ([]*connector.Connector, error) {
-	httpReq := &http.Request{
-		Header: make(http.Header),
-		Method: http.MethodGet,
-		URL:    l.url,
-	}
-	httpReq.Header.Add("Authorization", "Basic "+l.apiToken)
+	// TODO: All this HTTP sending, receiving and unmarshalling stuff is common and generic.
+	// DRY this out, possibly with generics (or just interface{}/any)
+	// httpReq := &http.Request{
+	// 	Header: make(http.Header),
+	// 	Method: http.MethodGet,
+	// 	URL:    l.url,
+	// }
+	// httpReq.Header.Add("Authorization", "Basic "+l.apiToken)
 
-	httpResp, err := l.httpClient.Do(httpReq)
+	// httpResp, err := l.httpClient.Do(httpReq)
+	// if err != nil {
+	// 	return nil, fmt.Errorf("sending HTTP GET request: %w", err)
+	// }
+
+	// if httpResp.StatusCode != http.StatusOK {
+	// 	return nil, fmt.Errorf("received HTTP status code %d", httpResp.StatusCode)
+	// }
+
+	// respBody := new(bytes.Buffer)
+	// if _, err := io.Copy(respBody, httpResp.Body); err != nil {
+	// 	return nil, fmt.Errorf("copying HTTP response body: %w", err)
+	// }
+	// respBodyBytes := respBody.Bytes()
+	// respBodyStr := string(respBodyBytes)
+
+	// fmt.Printf("==>%#v\n", respBodyStr)
+
+	// if err := httpResp.Body.Close(); err != nil {
+	// 	return nil, fmt.Errorf("closing HTTP response body: %w", err)
+	// }
+
+	// listConnectorsResp := new(connectorResp.ListConnectorsResp)
+	// if err := json.Unmarshal(respBodyBytes, listConnectorsResp); err != nil {
+	// 	return nil, fmt.Errorf("unmarshalling HTTP response body: %w", err)
+	// }
+
+	// if listConnectorsResp.Code != resp.ResponseCodeSuccess {
+	// 	return nil, fmt.Errorf("received response code %v", listConnectorsResp.Code)
+	// }
+
+	listConnectorsResp, err := jsonhttp.UnmarshallJSONFromHTTPGet[*connectorResp.ListConnectorsResp](l.url,
+		l.apiToken,
+		l.httpClient)
 	if err != nil {
-		return nil, fmt.Errorf("sending HTTP GET request: %w", err)
-	}
-
-	if httpResp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("received HTTP status code %d", httpResp.StatusCode)
-	}
-
-	respBody := new(bytes.Buffer)
-	if _, err := io.Copy(respBody, httpResp.Body); err != nil {
-		return nil, fmt.Errorf("copying HTTP response body: %w", err)
-	}
-	respBodyBytes := respBody.Bytes()
-	respBodyStr := string(respBodyBytes)
-
-	fmt.Printf("==>%#v\n", respBodyStr)
-
-	if err := httpResp.Body.Close(); err != nil {
-		return nil, fmt.Errorf("closing HTTP response body: %w", err)
-	}
-
-	listConnectorsResp := new(connectorResp.ListConnectorsResp)
-	if err := json.Unmarshal(respBodyBytes, listConnectorsResp); err != nil {
-		return nil, fmt.Errorf("unmarshalling HTTP response body: %w", err)
-	}
-
-	if listConnectorsResp.Code != resp.ResponseCodeSuccess {
-		return nil, fmt.Errorf("received response code %v", listConnectorsResp.Code)
+		return nil, fmt.Errorf("getting JSON HTTP response: %w", err)
 	}
 
 	groupName, err := l.GroupResolver.ResolveIDToName(l.groupID)

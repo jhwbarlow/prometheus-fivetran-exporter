@@ -73,9 +73,11 @@ func (c *DestinationCollector) Describe(descsChan chan<- *prometheus.Desc) {
 func (c *DestinationCollector) Collect(metricsChan chan<- prometheus.Metric) {
 	destination, err := c.Describer.Describe()
 	if err != nil {
+		// TODO: I do not believe we have to send this metric on the metricsChan as it
+		// is already registered
 		c.counterErrorsTotal.WithLabelValues(
-			c.Describer.GroupID()) // `group_id` label
-		log.Printf("Error getting destination: %v", err) // TODO: Use logger
+			c.Describer.GroupID()).Inc() // `group_id` label
+		log.Printf("Error describing destination: %v", err) // TODO: Use logger
 		return
 	}
 

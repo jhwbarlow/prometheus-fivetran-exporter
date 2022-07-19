@@ -32,6 +32,10 @@ type DescribeDestinationResp struct {
 	Data Data
 }
 
+func (r *DescribeDestinationResp) GetCode() resp.ResponseCode {
+	return r.Code
+}
+
 type Data struct {
 	ID          string
 	GroupID     string `json:"group_id"`

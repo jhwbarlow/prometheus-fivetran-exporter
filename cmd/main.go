@@ -282,8 +282,7 @@ func getConfig() (apiKey string,
 	collectedGroupNames []string,
 	metricsPort uint16,
 	err error) {
-	var configSourcer config.Sourcer
-	configSourcer = config.NewEnvVarSourcer()
+	var configSourcer config.Sourcer = config.NewEnvVarSourcer()
 
 	apiKey, err = configSourcer.APIKey()
 	if err != nil {

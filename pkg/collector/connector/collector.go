@@ -142,11 +142,14 @@ func (c *ConnectorCollector) Collect(metricsChan chan<- prometheus.Metric) {
 	// TODO: Change to use Group Name to match definition in constructor where it is initialised to zero.
 	// However, if the resolver dynamically looks up the connector name and that errors, we can not then
 	// increment for that error as we do not know the name.
-	// Thinking about it, we should probably use the group ID for the error metric as it is immutable.
+	// Thinking about it, we should probably use the group ID for the error metric as it is immutable, but
+	// then again, in the config we pass a list of group names, not IDs so that may be a pointless concern
 	connectors, err := c.Lister.List()
 	if err != nil {
+		// TODO: I do not believe we have to send this metric on the metricsChan as it
+		// is already registered
 		c.counterErrorsTotal.WithLabelValues(
-			c.Lister.GroupID()) // `group_id` label
+			c.Lister.GroupID()).Inc() // `group_id` label
 		log.Printf("Error getting connectors: %v", err) // TODO: Use logger
 		return
 	}
