@@ -231,45 +231,59 @@ func main() {
 	//}
 
 	// Loop through each group listed in the config (by name) and resolve to an ID
+	// TODO: By statically resolving the group ID to group Name in the constructor,
+	// we will not pick up if the group name changes. To solve this we need to dynamically
+	// create the error counter in each scrape (store the count locally in this object)
+	// and resolve the value on each scrape, as is done with the connectors
+	//
+
+	// TODO: Change to use Group Name to match definition in constructor where it is initialised to zero.
+	// However, if the resolver dynamically looks up the connector name and that errors, we can not then
+	// increment for that error as we do not know the name.
+	// Thinking about it, we should probably use the group ID for the error metric as it is immutable, but
+	// then again, in the config we pass a list of group names, not IDs so that may be a pointless concern
+	connectorListers := make([]connectorLister.Lister, 0, len(collectedGroupNames))
+	destinationDescribers := make([]destinationDescriber.Describer, 0, len(collectedGroupNames))
 	for _, groupName := range collectedGroupNames {
 		groupID, err := groupResolver.ResolveNameToID(groupName)
 		if err != nil {
 			log.Fatalf("Resolving group name %q to ID error\n", groupName)
 		}
 
-		// Construct a lister and a collector for each listed group
-		// BUG: Cannot have multiple collectors with the same name, Prometheus complains
-		// TODO: Need to pass a slice of listers to the collector and range through them in the collector
+		// Construct a connector lister for each listed group
 		connectorLister, err := connectorLister.NewAPILister(apiKey,
 			apiSecret,
 			apiURL,
 			groupID,
-			apiTimeout,
-			groupResolver)
+			groupName,
+			apiTimeout)
 		if err != nil {
 			log.Fatalf("Connector lister constructor error: %v\n", err)
 		}
-		connectorCollector, err := connectorCollector.NewConnectorCollector(connectorLister, groupResolver)
-		if err != nil {
-			log.Fatalf("Connector collector constructor error: %v\n", err)
-		}
-		prometheus.MustRegister(connectorCollector)
+		connectorListers = append(connectorListers, connectorLister)
 
-		// Construct a destination describer and destination collector for each listed group
-		// BUG: Cannot have multiple collectors with the same name, Prometheus complains
-		// TODO: Need to pass a slice of listers to the collector and range through them in the collector
+		// Construct a destination describer for each listed group
 		destinationDescriber, err := destinationDescriber.NewAPIDescriber(apiKey,
 			apiSecret,
 			apiURL,
 			groupID,
-			apiTimeout,
-			groupResolver)
+			groupName,
+			apiTimeout)
 		if err != nil {
 			log.Fatalf("Destination describer constructor error: %v\n", err)
 		}
-		destinationCollector := destinationCollector.NewDestinationCollector(destinationDescriber)
-		prometheus.MustRegister(destinationCollector)
+		destinationDescribers = append(destinationDescribers, destinationDescriber)
 	}
+
+	connectorCollector, err := connectorCollector.NewConnectorCollector(connectorListers)
+	if err != nil {
+		log.Fatalf("Connector collector constructor error: %v\n", err)
+	}
+
+	destinationCollector := destinationCollector.NewDestinationCollector(destinationDescribers)
+
+	prometheus.MustRegister(destinationCollector)
+	prometheus.MustRegister(connectorCollector)
 
 	if err := run(metricsPort); err != nil {
 		log.Fatalf("Running exporter error: %v\n", err)

@@ -34,13 +34,12 @@ var (
 )
 
 type DestinationCollector struct {
-	Describer          destinationDescriber.Describer
+	Describers         []destinationDescriber.Describer
 	counterErrorsTotal *prometheus.CounterVec
 	collectFuncs       []collectFunc
 }
 
-func NewDestinationCollector(describer destinationDescriber.Describer) *DestinationCollector {
-	// TODO: group_name not ID!
+func NewDestinationCollector(describers []destinationDescriber.Describer) *DestinationCollector {
 	counterErrorsTotal := prometheus.NewCounterVec(prometheus.CounterOpts{
 		Namespace: namespace,
 		Subsystem: subsystem,
@@ -48,12 +47,15 @@ func NewDestinationCollector(describer destinationDescriber.Describer) *Destinat
 		Help:      "Total errors encountered querying destination",
 	},
 		[]string{"group_name"})
-
 	prometheus.MustRegister(counterErrorsTotal)
-	counterErrorsTotal.WithLabelValues(describer.GroupID()).Add(0)
+
+	for _, describer := range describers {
+		// Initialise the error counter to zero for all group names
+		counterErrorsTotal.WithLabelValues(describer.GetGroupName()).Add(0)
+	}
 
 	collector := &DestinationCollector{
-		Describer:          describer,
+		Describers:         describers,
 		counterErrorsTotal: counterErrorsTotal,
 	}
 
@@ -71,22 +73,35 @@ func (c *DestinationCollector) Describe(descsChan chan<- *prometheus.Desc) {
 }
 
 func (c *DestinationCollector) Collect(metricsChan chan<- prometheus.Metric) {
-	destination, err := c.Describer.Describe()
+	waitGroup := new(sync.WaitGroup)
+	waitGroup.Add(len(c.Describers))
+	for _, describer := range c.Describers {
+		go c.collectForDescriber(describer, metricsChan, waitGroup)
+	}
+	waitGroup.Wait()
+}
+
+func (c *DestinationCollector) collectForDescriber(describer destinationDescriber.Describer,
+	metricsChan chan<- prometheus.Metric,
+	waitGroup *sync.WaitGroup) {
+	defer waitGroup.Done()
+
+	destination, err := describer.Describe()
 	if err != nil {
-		// TODO: I do not believe we have to send this metric on the metricsChan as it
-		// is already registered
+		// We do not have to send this metric on the metricsChan as it is already registered
+		// (it is a metric _belonging_ to this collector, rather than _collected_)
 		c.counterErrorsTotal.WithLabelValues(
-			c.Describer.GroupID()).Inc() // `group_id` label
+			describer.GetGroupName()).Inc() // `group_name` label
 		log.Printf("Error describing destination: %v", err) // TODO: Use logger
 		return
 	}
 
-	waitGroup := new(sync.WaitGroup)
-	waitGroup.Add(len(c.collectFuncs))
+	collectFuncWaitGroup := new(sync.WaitGroup)
+	collectFuncWaitGroup.Add(len(c.collectFuncs))
 	for _, collectFunc := range c.collectFuncs {
-		go collectFunc(destination, metricsChan, waitGroup)
+		go collectFunc(destination, metricsChan, collectFuncWaitGroup)
 	}
-	waitGroup.Wait()
+	collectFuncWaitGroup.Wait()
 
 	// TODO: Handle errors and increment error counter
 }

@@ -1,13 +1,11 @@
 package connector
 
 import (
-	"fmt"
 	"log"
 	"sync"
 
 	"github.com/jhwbarlow/prometheus-fivetran-exporter/pkg/connector"
 	connectorLister "github.com/jhwbarlow/prometheus-fivetran-exporter/pkg/lister/connector"
-	groupResolver "github.com/jhwbarlow/prometheus-fivetran-exporter/pkg/resolver/group"
 	"github.com/prometheus/client_golang/prometheus"
 )
 
@@ -85,23 +83,13 @@ var (
 )
 
 type ConnectorCollector struct {
-	Lister connectorLister.Lister
+	Listers []connectorLister.Lister
 
 	counterErrorsTotal *prometheus.CounterVec
 	collectFuncs       []collectFunc
 }
 
-func NewConnectorCollector(lister connectorLister.Lister,
-	groupResolver groupResolver.Resolver) (*ConnectorCollector, error) {
-	// TODO: By statically resolving the group ID to group Name in the constructor,
-	// we will not pick up if the group name changes. To solve this we need to dynamically
-	// create the error counter in each scrape (store the count locally in this object)
-	// and resolve the value on each scrape, as is done with the connectors
-	groupName, err := groupResolver.ResolveIDToName(lister.GroupID())
-	if err != nil {
-		return nil, fmt.Errorf("resolving group ID %q to group name", lister.GroupID())
-	}
-
+func NewConnectorCollector(listers []connectorLister.Lister) (*ConnectorCollector, error) {
 	counterErrorsTotal := prometheus.NewCounterVec(prometheus.CounterOpts{
 		Namespace: namespace,
 		Subsystem: subsystem,
@@ -109,12 +97,15 @@ func NewConnectorCollector(lister connectorLister.Lister,
 		Help:      "Total errors encountered querying connectors",
 	},
 		[]string{"group_name"})
-
 	prometheus.MustRegister(counterErrorsTotal)
-	counterErrorsTotal.WithLabelValues(groupName).Add(0)
+
+	for _, lister := range listers {
+		// Initialise the error counter to zero for all group names
+		counterErrorsTotal.WithLabelValues(lister.GetGroupName()).Add(0)
+	}
 
 	collector := &ConnectorCollector{
-		Lister:             lister,
+		Listers:            listers,
 		counterErrorsTotal: counterErrorsTotal,
 	}
 
@@ -139,27 +130,35 @@ func (c *ConnectorCollector) Describe(descsChan chan<- *prometheus.Desc) {
 }
 
 func (c *ConnectorCollector) Collect(metricsChan chan<- prometheus.Metric) {
-	// TODO: Change to use Group Name to match definition in constructor where it is initialised to zero.
-	// However, if the resolver dynamically looks up the connector name and that errors, we can not then
-	// increment for that error as we do not know the name.
-	// Thinking about it, we should probably use the group ID for the error metric as it is immutable, but
-	// then again, in the config we pass a list of group names, not IDs so that may be a pointless concern
-	connectors, err := c.Lister.List()
+	waitGroup := new(sync.WaitGroup)
+	waitGroup.Add(len(c.Listers))
+	for _, lister := range c.Listers {
+		go c.collectForLister(lister, metricsChan, waitGroup)
+	}
+	waitGroup.Wait()
+}
+
+func (c *ConnectorCollector) collectForLister(lister connectorLister.Lister,
+	metricsChan chan<- prometheus.Metric,
+	waitGroup *sync.WaitGroup) {
+	defer waitGroup.Done()
+
+	connectors, err := lister.List()
 	if err != nil {
-		// TODO: I do not believe we have to send this metric on the metricsChan as it
-		// is already registered
+		// We do not have to send this metric on the metricsChan as it is already registered
+		// (it is a metric _belonging_ to this collector, rather than _collected_)
 		c.counterErrorsTotal.WithLabelValues(
-			c.Lister.GroupID()).Inc() // `group_id` label
-		log.Printf("Error getting connectors: %v", err) // TODO: Use logger
+			lister.GetGroupName()).Inc() // `group_name` label
+		log.Printf("Error listing connectors: %v", err) // TODO: Use logger
 		return
 	}
 
-	waitGroup := new(sync.WaitGroup)
+	collectFuncWaitGroup := new(sync.WaitGroup)
 	waitGroup.Add(len(c.collectFuncs))
 	for _, collectFunc := range c.collectFuncs {
 		go collectFunc(connectors, metricsChan, waitGroup)
 	}
-	waitGroup.Wait()
+	collectFuncWaitGroup.Wait()
 
 	// TODO: Handle errors and increment error counter
 }
