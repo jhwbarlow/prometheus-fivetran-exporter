@@ -1,7 +1,6 @@
 package main
 
 import (
-	//"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
@@ -10,15 +9,11 @@ import (
 	connectorCollector "github.com/jhwbarlow/prometheus-fivetran-exporter/pkg/collector/connector"
 	destinationCollector "github.com/jhwbarlow/prometheus-fivetran-exporter/pkg/collector/destination"
 	"github.com/jhwbarlow/prometheus-fivetran-exporter/pkg/config"
-	destinationDescriber "github.com/jhwbarlow/prometheus-fivetran-exporter/pkg/describer/destination"
-	connectorLister "github.com/jhwbarlow/prometheus-fivetran-exporter/pkg/lister/connector"
-	groupLister "github.com/jhwbarlow/prometheus-fivetran-exporter/pkg/lister/group"
-	groupResolver "github.com/jhwbarlow/prometheus-fivetran-exporter/pkg/resolver/group"
+	"github.com/jhwbarlow/prometheus-fivetran-exporter/pkg/connector"
+	"github.com/jhwbarlow/prometheus-fivetran-exporter/pkg/destination"
+	"github.com/jhwbarlow/prometheus-fivetran-exporter/pkg/group"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
-	// "github.com/jhwbarlow/prometheus-fivetran-exporter/pkg/resp/connector"
-	// "github.com/jhwbarlow/prometheus-fivetran-exporter/pkg/resp/destination"
-	// "github.com/jhwbarlow/prometheus-fivetran-exporter/pkg/resp/group"
 )
 
 const (
@@ -220,15 +215,11 @@ func main() {
 	}
 
 	// TODO: List the groups so that we can reference by name and not ID
-	groupLister, err := groupLister.NewAPILister(apiKey, apiSecret, apiURL, 10*time.Second)
+	groupLister, err := group.NewAPILister(apiKey, apiSecret, apiURL, 10*time.Second)
 	if err != nil {
 		log.Fatalf("Group lister constructor error: %v\n", err)
 	}
-	groupResolver := groupResolver.NewDynamicLookupResolver(groupLister)
-	//groupResolver, err := groupResolver.NewStaticMemoryLookupResolver(groupLister)
-	//if err != nil {
-	//	log.Fatalf("Group resolver constructor error: %v\n", err)
-	//}
+	groupResolver := group.NewGroupListerResolver(groupLister)
 
 	// Loop through each group listed in the config (by name) and resolve to an ID
 	// TODO: By statically resolving the group ID to group Name in the constructor,
@@ -242,8 +233,8 @@ func main() {
 	// increment for that error as we do not know the name.
 	// Thinking about it, we should probably use the group ID for the error metric as it is immutable, but
 	// then again, in the config we pass a list of group names, not IDs so that may be a pointless concern
-	connectorListers := make([]connectorLister.Lister, 0, len(collectedGroupNames))
-	destinationDescribers := make([]destinationDescriber.Describer, 0, len(collectedGroupNames))
+	connectorListers := make([]connector.Lister, 0, len(collectedGroupNames))
+	destinationDescribers := make([]destination.Describer, 0, len(collectedGroupNames))
 	for _, groupName := range collectedGroupNames {
 		groupID, err := groupResolver.ResolveNameToID(groupName)
 		if err != nil {
@@ -251,7 +242,7 @@ func main() {
 		}
 
 		// Construct a connector lister for each listed group
-		connectorLister, err := connectorLister.NewAPILister(apiKey,
+		connectorLister, err := connector.NewAPILister(apiKey,
 			apiSecret,
 			apiURL,
 			groupID,
@@ -263,7 +254,7 @@ func main() {
 		connectorListers = append(connectorListers, connectorLister)
 
 		// Construct a destination describer for each listed group
-		destinationDescriber, err := destinationDescriber.NewAPIDescriber(apiKey,
+		destinationDescriber, err := destination.NewAPIDescriber(apiKey,
 			apiSecret,
 			apiURL,
 			groupID,

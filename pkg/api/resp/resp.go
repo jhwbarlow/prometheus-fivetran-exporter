@@ -1,4 +1,4 @@
-package resp
+package apiresp
 
 import "encoding/json"
 

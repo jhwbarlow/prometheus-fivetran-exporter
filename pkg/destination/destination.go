@@ -8,3 +8,11 @@ type Destination struct {
 	Service     string
 	SetupStatus SetupStatus
 }
+
+type SetupStatus string
+
+const (
+	SetupStatusBroken     SetupStatus = "broken"
+	SetupStatusConnected  SetupStatus = "connected"
+	SetupStatusIncomplete SetupStatus = "incomplete"
+)

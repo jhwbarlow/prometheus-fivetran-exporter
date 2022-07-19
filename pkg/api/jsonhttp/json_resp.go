@@ -8,11 +8,11 @@ import (
 	"net/http"
 	"net/url"
 
-	"github.com/jhwbarlow/prometheus-fivetran-exporter/pkg/resp"
+	apiresp "github.com/jhwbarlow/prometheus-fivetran-exporter/pkg/api/resp"
 )
 
 type GetCoder interface {
-	GetCode() resp.ResponseCode
+	GetCode() apiresp.ResponseCode
 }
 
 func UnmarshallJSONFromHTTPGet[T GetCoder](url *url.URL, apiToken string, httpClient *http.Client) (T, error) {
@@ -52,7 +52,7 @@ func UnmarshallJSONFromHTTPGet[T GetCoder](url *url.URL, apiToken string, httpCl
 		return genericZeroValue, fmt.Errorf("unmarshalling HTTP response body: %w", err)
 	}
 
-	if respStruct.GetCode() != resp.ResponseCodeSuccess {
+	if respStruct.GetCode() != apiresp.ResponseCodeSuccess {
 		return genericZeroValue, fmt.Errorf("received response code %v", respStruct.GetCode())
 	}
 

@@ -5,7 +5,6 @@ import (
 	"sync"
 
 	"github.com/jhwbarlow/prometheus-fivetran-exporter/pkg/connector"
-	connectorLister "github.com/jhwbarlow/prometheus-fivetran-exporter/pkg/lister/connector"
 	"github.com/prometheus/client_golang/prometheus"
 )
 
@@ -83,13 +82,13 @@ var (
 )
 
 type ConnectorCollector struct {
-	Listers []connectorLister.Lister
+	Listers []connector.Lister
 
 	counterErrorsTotal *prometheus.CounterVec
 	collectFuncs       []collectFunc
 }
 
-func NewConnectorCollector(listers []connectorLister.Lister) (*ConnectorCollector, error) {
+func NewConnectorCollector(listers []connector.Lister) (*ConnectorCollector, error) {
 	counterErrorsTotal := prometheus.NewCounterVec(prometheus.CounterOpts{
 		Namespace: namespace,
 		Subsystem: subsystem,
@@ -138,7 +137,7 @@ func (c *ConnectorCollector) Collect(metricsChan chan<- prometheus.Metric) {
 	waitGroup.Wait()
 }
 
-func (c *ConnectorCollector) collectForLister(lister connectorLister.Lister,
+func (c *ConnectorCollector) collectForLister(lister connector.Lister,
 	metricsChan chan<- prometheus.Metric,
 	waitGroup *sync.WaitGroup) {
 	defer waitGroup.Done()

@@ -4,7 +4,6 @@ import (
 	"log"
 	"sync"
 
-	destinationDescriber "github.com/jhwbarlow/prometheus-fivetran-exporter/pkg/describer/destination"
 	"github.com/jhwbarlow/prometheus-fivetran-exporter/pkg/destination"
 	"github.com/prometheus/client_golang/prometheus"
 )
@@ -34,12 +33,12 @@ var (
 )
 
 type DestinationCollector struct {
-	Describers         []destinationDescriber.Describer
+	Describers         []destination.Describer
 	counterErrorsTotal *prometheus.CounterVec
 	collectFuncs       []collectFunc
 }
 
-func NewDestinationCollector(describers []destinationDescriber.Describer) *DestinationCollector {
+func NewDestinationCollector(describers []destination.Describer) *DestinationCollector {
 	counterErrorsTotal := prometheus.NewCounterVec(prometheus.CounterOpts{
 		Namespace: namespace,
 		Subsystem: subsystem,
@@ -81,7 +80,7 @@ func (c *DestinationCollector) Collect(metricsChan chan<- prometheus.Metric) {
 	waitGroup.Wait()
 }
 
-func (c *DestinationCollector) collectForDescriber(describer destinationDescriber.Describer,
+func (c *DestinationCollector) collectForDescriber(describer destination.Describer,
 	metricsChan chan<- prometheus.Metric,
 	waitGroup *sync.WaitGroup) {
 	defer waitGroup.Done()

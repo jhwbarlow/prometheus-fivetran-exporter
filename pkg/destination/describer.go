@@ -7,13 +7,12 @@ import (
 	"net/url"
 	"time"
 
-	"github.com/jhwbarlow/prometheus-fivetran-exporter/pkg/destination"
-	jsonhttp "github.com/jhwbarlow/prometheus-fivetran-exporter/pkg/jsonhttp"
-	destinationResp "github.com/jhwbarlow/prometheus-fivetran-exporter/pkg/resp/destination"
+	jsonhttp "github.com/jhwbarlow/prometheus-fivetran-exporter/pkg/api/jsonhttp"
+	apiresp "github.com/jhwbarlow/prometheus-fivetran-exporter/pkg/api/resp/destination"
 )
 
 type Describer interface {
-	Describe() (*destination.Destination, error)
+	Describe() (*Destination, error)
 	GetGroupID() string
 	GetGroupName() string
 }
@@ -48,15 +47,20 @@ func NewAPIDescriber(APIKey, APISecret, APIURL, groupID, groupName string,
 	}, nil
 }
 
-func (d *APIDescriber) Describe() (*destination.Destination, error) {
-	describeDestinationResp, err := jsonhttp.UnmarshallJSONFromHTTPGet[*destinationResp.DescribeDestinationResp](d.url,
+func (d *APIDescriber) Describe() (*Destination, error) {
+	describeDestinationResp, err := jsonhttp.UnmarshallJSONFromHTTPGet[*apiresp.DescribeDestinationResp](d.url,
 		d.apiToken,
 		d.httpClient)
 	if err != nil {
 		return nil, fmt.Errorf("getting JSON HTTP response: %w", err)
 	}
 
-	destination := &destination.Destination{
+	setupStatus, err := convertSetupStatus(describeDestinationResp.Data.SetupStatus)
+	if err != nil {
+		return nil, fmt.Errorf("converting Setup Status: %w", err)
+	}
+
+	destination := &Destination{
 		ID:   describeDestinationResp.Data.ID,
 		Name: d.GroupName, // XXX: There is no way to get this info directly from the destination
 		// as Fivetran does not have the concept of a group name separate from the destination name.
@@ -64,7 +68,7 @@ func (d *APIDescriber) Describe() (*destination.Destination, error) {
 		GroupID:     d.GroupID,
 		GroupName:   d.GroupName,
 		Service:     describeDestinationResp.Data.Service,
-		SetupStatus: describeDestinationResp.Data.SetupStatus,
+		SetupStatus: setupStatus,
 	}
 
 	return destination, nil
@@ -76,4 +80,17 @@ func (d *APIDescriber) GetGroupID() string {
 
 func (d *APIDescriber) GetGroupName() string {
 	return d.GroupName
+}
+
+func convertSetupStatus(apiSetupStatus apiresp.SetupStatus) (SetupStatus, error) {
+	switch apiSetupStatus {
+	case apiresp.SetupStatusIncomplete:
+		return SetupStatusIncomplete, nil
+	case apiresp.SetupStatusBroken:
+		return SetupStatusBroken, nil
+	case apiresp.SetupStatusConnected:
+		return SetupStatusConnected, nil
+	default:
+		return SetupStatus(""), fmt.Errorf("illegal API Setup Status: %q", apiSetupStatus)
+	}
 }
