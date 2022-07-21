@@ -6,6 +6,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"go.uber.org/zap"
 )
 
 const (
@@ -24,36 +26,40 @@ type Sourcer interface {
 	MetricsPort() (uint16, error)
 }
 
-type EnvVarSourcer struct{}
-
-func NewEnvVarSourcer() *EnvVarSourcer {
-	return new(EnvVarSourcer)
+type EnvVarSourcer struct {
+	logger *zap.SugaredLogger
 }
 
-func (*EnvVarSourcer) APIKey() (string, error) {
-	return getEnvVar(apiKeyEnvVar)
+func NewEnvVarSourcer(logger *zap.SugaredLogger) *EnvVarSourcer {
+	logger = getComponentLogger(logger, "env-var-sourcer")
+	return &EnvVarSourcer{logger}
 }
 
-func (*EnvVarSourcer) APISecret() (string, error) {
-	return getEnvVar(apiSecretEnvVar)
+func (s *EnvVarSourcer) APIKey() (string, error) {
+	return s.getEnvVar(apiKeyEnvVar)
 }
 
-func (*EnvVarSourcer) APICallTimeout() (time.Duration, error) {
-	timeoutStr, err := getEnvVar(timeoutEnvVar)
+func (s *EnvVarSourcer) APISecret() (string, error) {
+	return s.getEnvVar(apiSecretEnvVar)
+}
+
+func (s *EnvVarSourcer) APICallTimeout() (time.Duration, error) {
+	timeoutStr, err := s.getEnvVar(timeoutEnvVar)
 	if err != nil {
 		return 0, err
 	}
 
 	timeout, err := time.ParseDuration(timeoutStr)
 	if err != nil {
-		return 0, fmt.Errorf("parsing API call timeout: %w", err)
+		s.logger.Errorw("parsing API call timeout", "timeout", timeoutStr, "error", err)
+		return 0, fmt.Errorf("parsing API call timeout %q: %w", timeoutStr, err)
 	}
 
 	return timeout, nil
 }
 
-func (*EnvVarSourcer) CollectedGroupNames() ([]string, error) {
-	csv, err := getEnvVar(groupsEnvVar)
+func (s *EnvVarSourcer) CollectedGroupNames() ([]string, error) {
+	csv, err := s.getEnvVar(groupsEnvVar)
 	if err != nil {
 		return nil, err
 	}
@@ -63,6 +69,7 @@ func (*EnvVarSourcer) CollectedGroupNames() ([]string, error) {
 	for _, name := range split {
 		trimmed := strings.Trim(name, " ")
 		if trimmed == "" {
+			s.logger.Errorw("invalid group name in environment variable", "name", groupsEnvVar)
 			return nil, fmt.Errorf("invalid group name in environment variable %q", groupsEnvVar)
 		}
 
@@ -72,24 +79,27 @@ func (*EnvVarSourcer) CollectedGroupNames() ([]string, error) {
 	return trimmedNames, nil
 }
 
-func (*EnvVarSourcer) MetricsPort() (uint16, error) {
-	portStr, err := getEnvVar(metricsPortEnvVar)
+func (s *EnvVarSourcer) MetricsPort() (uint16, error) {
+	portStr, err := s.getEnvVar(metricsPortEnvVar)
 	if err != nil {
 		return 0, err
 	}
 
 	port, err := strconv.ParseUint(portStr, 10, 16)
 	if err != nil {
-		return 0, fmt.Errorf("parsing metrics port: %w", err)
+		s.logger.Errorw("parsing metrics port", "port", portStr, "error", err)
+		return 0, fmt.Errorf("parsing metrics port %q: %w", portStr, err)
 	}
 
 	return uint16(port), nil
 }
 
-func getEnvVar(name string) (string, error) {
+func (s *EnvVarSourcer) getEnvVar(name string) (string, error) {
 	if val := os.Getenv(name); val != "" {
+		s.logger.Infow("read environment variable", "name", name)
 		return val, nil
 	}
 
+	s.logger.Errorw("environment variable not set", "name", name)
 	return "", fmt.Errorf("environment variable %q not set", name)
 }

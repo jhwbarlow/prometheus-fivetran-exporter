@@ -6,9 +6,8 @@ type ResponseCode string
 
 const (
 	ResponseCodeSuccess ResponseCode = "Success"
+	// TODO: Other values?
 )
-
-// TODO: Other values?
 
 func (rc *ResponseCode) UnmarshalJSON(data []byte) error {
 	var str string

@@ -1,11 +1,12 @@
 package destination
 
 import (
-	"log"
 	"sync"
 
+	"github.com/jhwbarlow/prometheus-fivetran-exporter/pkg/collector/metrics"
 	"github.com/jhwbarlow/prometheus-fivetran-exporter/pkg/destination"
 	"github.com/prometheus/client_golang/prometheus"
+	"go.uber.org/zap"
 )
 
 type collectFunc func(*destination.Destination, chan<- prometheus.Metric, *sync.WaitGroup)
@@ -20,25 +21,30 @@ const (
 )
 
 var (
-	gaugeSetupStateDesc = prometheus.NewDesc(
-		prometheus.BuildFQName(namespace, subsystem, gaugeSetupStatusName),
-		"Current setup state of a destination",
+	gaugeSetupStateFQName = prometheus.BuildFQName(namespace, subsystem, gaugeSetupStatusName)
+	gaugeSetupStateDesc   = prometheus.NewDesc(
+		gaugeSetupStateFQName,
+		setupStatusEnumGauge.Describe(),
 		[]string{"group_name", "name"},
 		prometheus.Labels{})
-	gaugeInfoDesc = prometheus.NewDesc(
-		prometheus.BuildFQName(namespace, subsystem, gaugeInfoName),
-		"Information about a destination",
+	gaugeInfoFQName = prometheus.BuildFQName(namespace, subsystem, gaugeInfoName)
+	gaugeInfoDesc   = prometheus.NewDesc(
+		gaugeInfoFQName,
+		infoEnumGauge.Describe(),
 		[]string{"group_name", "group_id", "name", "id", "service"},
 		prometheus.Labels{})
 )
 
-type DestinationCollector struct {
+type Collector struct {
 	Describers         []destination.Describer
 	counterErrorsTotal *prometheus.CounterVec
 	collectFuncs       []collectFunc
+	logger             *zap.SugaredLogger
 }
 
-func NewDestinationCollector(describers []destination.Describer) *DestinationCollector {
+func NewCollector(logger *zap.SugaredLogger, describers []destination.Describer) *Collector {
+	logger = getComponentLogger(logger, "collector")
+
 	counterErrorsTotal := prometheus.NewCounterVec(prometheus.CounterOpts{
 		Namespace: namespace,
 		Subsystem: subsystem,
@@ -53,9 +59,10 @@ func NewDestinationCollector(describers []destination.Describer) *DestinationCol
 		counterErrorsTotal.WithLabelValues(describer.GetGroupName()).Add(0)
 	}
 
-	collector := &DestinationCollector{
+	collector := &Collector{
 		Describers:         describers,
 		counterErrorsTotal: counterErrorsTotal,
+		logger:             logger,
 	}
 
 	collectFuncs := []collectFunc{
@@ -67,11 +74,11 @@ func NewDestinationCollector(describers []destination.Describer) *DestinationCol
 	return collector
 }
 
-func (c *DestinationCollector) Describe(descsChan chan<- *prometheus.Desc) {
-	prometheus.DescribeByCollect(c, descsChan) // TODO: Review usage in light of extra label values may pop into and out of existence
+func (c *Collector) Describe(descsChan chan<- *prometheus.Desc) {
+	prometheus.DescribeByCollect(c, descsChan)
 }
 
-func (c *DestinationCollector) Collect(metricsChan chan<- prometheus.Metric) {
+func (c *Collector) Collect(metricsChan chan<- prometheus.Metric) {
 	waitGroup := new(sync.WaitGroup)
 	waitGroup.Add(len(c.Describers))
 	for _, describer := range c.Describers {
@@ -80,7 +87,7 @@ func (c *DestinationCollector) Collect(metricsChan chan<- prometheus.Metric) {
 	waitGroup.Wait()
 }
 
-func (c *DestinationCollector) collectForDescriber(describer destination.Describer,
+func (c *Collector) collectForDescriber(describer destination.Describer,
 	metricsChan chan<- prometheus.Metric,
 	waitGroup *sync.WaitGroup) {
 	defer waitGroup.Done()
@@ -91,7 +98,7 @@ func (c *DestinationCollector) collectForDescriber(describer destination.Describ
 		// (it is a metric _belonging_ to this collector, rather than _collected_)
 		c.counterErrorsTotal.WithLabelValues(
 			describer.GetGroupName()).Inc() // `group_name` label
-		log.Printf("Error describing destination: %v", err) // TODO: Use logger
+		c.logger.Errorw("describing destination", "group_name", describer.GetGroupName(), "error", err)
 		return
 	}
 
@@ -99,13 +106,15 @@ func (c *DestinationCollector) collectForDescriber(describer destination.Describ
 	collectFuncWaitGroup.Add(len(c.collectFuncs))
 	for _, collectFunc := range c.collectFuncs {
 		go collectFunc(destination, metricsChan, collectFuncWaitGroup)
+		// TODO: Handle errors and increment error counter.
+		// Currently the collectFuncs do not return an error, as
+		// we trust that the data they work on is 100% legit, as
+		// it was sanity-checked by the describer already
 	}
 	collectFuncWaitGroup.Wait()
-
-	// TODO: Handle errors and increment error counter
 }
 
-func (c *DestinationCollector) collectSetupStatus(dest *destination.Destination,
+func (c *Collector) collectSetupStatus(dest *destination.Destination,
 	metricsChan chan<- prometheus.Metric,
 	waitGroup *sync.WaitGroup) {
 	defer waitGroup.Done()
@@ -120,24 +129,35 @@ func (c *DestinationCollector) collectSetupStatus(dest *destination.Destination,
 
 	metricsChan <- prometheus.MustNewConstMetric(gaugeSetupStateDesc,
 		prometheus.GaugeValue,
-		float64(value),
-		dest.GroupID, // `group` label
-		dest.Name)    // `destination_name` label
+		value.GaugeValue(),
+		dest.GroupName, // `group_name` label
+		dest.Name)      // `name` label
 
+	c.logger.Infow("collected metric",
+		"group_name", dest.GroupName,
+		"name", dest.Name,
+		"metric", gaugeSetupStateFQName)
 }
 
-func (c *DestinationCollector) collectInfo(dest *destination.Destination,
+func (c *Collector) collectInfo(dest *destination.Destination,
 	metricsChan chan<- prometheus.Metric,
 	waitGroup *sync.WaitGroup) {
 	defer waitGroup.Done()
 
 	metricsChan <- prometheus.MustNewConstMetric(gaugeInfoDesc,
 		prometheus.GaugeValue,
-		float64(infoGaugeValuePresent),
+		metrics.EnumGaugeValuePresent.GaugeValue(),
 		dest.GroupName, // `group_name` label
 		dest.GroupID,   // `group_id` label
 		dest.Name,      // `name` label
 		dest.ID,        // `id` label
 		dest.Service)   // `service` label
 
+	c.logger.Infow("collected metric",
+		"group_name", dest.GroupName,
+		"group_id", dest.GroupID,
+		"name", dest.Name,
+		"id", dest.ID,
+		"service", dest.Service,
+		"metric", gaugeInfoFQName)
 }

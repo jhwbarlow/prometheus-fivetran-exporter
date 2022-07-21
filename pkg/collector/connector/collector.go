@@ -1,11 +1,12 @@
 package connector
 
 import (
-	"log"
 	"sync"
 
+	"github.com/jhwbarlow/prometheus-fivetran-exporter/pkg/collector/metrics"
 	"github.com/jhwbarlow/prometheus-fivetran-exporter/pkg/connector"
 	"github.com/prometheus/client_golang/prometheus"
+	"go.uber.org/zap"
 )
 
 type collectFunc func([]*connector.Connector, chan<- prometheus.Metric, *sync.WaitGroup)
@@ -27,68 +28,79 @@ const (
 )
 
 var (
-	// TODO: Add enum gauge values to description
-	gaugePausedDesc = prometheus.NewDesc(
-		prometheus.BuildFQName(namespace, subsystem, gaugePausedName),
-		"Current paused state of a connector",
+	gaugePausedFQName = prometheus.BuildFQName(namespace, subsystem, gaugePausedName)
+	gaugePausedDesc   = prometheus.NewDesc(
+		gaugePausedFQName,
+		pausedEnumGauge.Describe(),
 		[]string{"group_name", "name"},
 		prometheus.Labels{})
-	gaugeSetupStateDesc = prometheus.NewDesc(
-		prometheus.BuildFQName(namespace, subsystem, gaugeSetupStateName),
-		"Current setup state of a connector",
+	gaugeSetupStateFQName = prometheus.BuildFQName(namespace, subsystem, gaugeSetupStateName)
+	gaugeSetupStateDesc   = prometheus.NewDesc(
+		gaugeSetupStateFQName,
+		setupStateEnumGauge.Describe(),
 		[]string{"group_name", "name"},
 		prometheus.Labels{})
-	gaugeSyncStateDesc = prometheus.NewDesc(
-		prometheus.BuildFQName(namespace, subsystem, gaugeSyncStateName),
-		"Current sync state of a connector",
+	gaugeSyncStateFQName = prometheus.BuildFQName(namespace, subsystem, gaugeSyncStateName)
+	gaugeSyncStateDesc   = prometheus.NewDesc(
+		gaugeSyncStateFQName,
+		syncStateEnumGauge.Describe(),
 		[]string{"group_name", "name"},
 		prometheus.Labels{})
-	gaugeUpdateStateDesc = prometheus.NewDesc(
-		prometheus.BuildFQName(namespace, subsystem, gaugeUpdateStateName),
-		"Current update state of a connector",
+	gaugeUpdateStateFQName = prometheus.BuildFQName(namespace, subsystem, gaugeUpdateStateName)
+	gaugeUpdateStateDesc   = prometheus.NewDesc(
+		gaugeUpdateStateFQName,
+		updateStateEnumGauge.Describe(),
 		[]string{"group_name", "name"},
 		prometheus.Labels{})
-	gaugeSyncFrequencyDesc = prometheus.NewDesc(
-		prometheus.BuildFQName(namespace, subsystem, gaugeSyncFrequencyName),
+	gaugeSyncFrequencyFQName = prometheus.BuildFQName(namespace, subsystem, gaugeSyncFrequencyName)
+	gaugeSyncFrequencyDesc   = prometheus.NewDesc(
+		gaugeSyncFrequencyFQName,
 		"Current sync frequency of a connector",
 		[]string{"group_name", "name"},
 		prometheus.Labels{})
 	// TODO: Would this be better served by a counter? We'd have to keep locally a map
 	// of the last warning count for each connector, and then increment the count by
 	// any difference between one scrape and the next
-	gaugeTaskCount = prometheus.NewDesc(
-		prometheus.BuildFQName(namespace, subsystem, gaugeTaskCountName),
+	gaugeTaskCountFQName = prometheus.BuildFQName(namespace, subsystem, gaugeTaskCountName)
+	gaugeTaskCount       = prometheus.NewDesc(
+		gaugeTaskCountFQName,
 		"Number of outstanding tasks for a connector",
 		[]string{"group_name", "name"},
 		prometheus.Labels{})
 	// TODO: Would this be better served by a counter? We'd have to keep locally a map
 	// of the last warning count for each connector, and then increment the count by
 	// any difference between one scrape and the next
-	gaugeWarningCount = prometheus.NewDesc(
-		prometheus.BuildFQName(namespace, subsystem, gaugeWarningCountName),
+	gaugeWarningCountFQName = prometheus.BuildFQName(namespace, subsystem, gaugeWarningCountName)
+	gaugeWarningCount       = prometheus.NewDesc(
+		gaugeWarningCountFQName,
 		"Number of current warnings/alerts for a connector",
 		[]string{"group_name", "name"},
 		prometheus.Labels{})
-	gaugeInHistoricalSync = prometheus.NewDesc(
-		prometheus.BuildFQName(namespace, subsystem, gaugeInHistoricalSyncName),
-		"Current historical sync state of a connector",
+	gaugeInHistoricalSyncFQName = prometheus.BuildFQName(namespace, subsystem, gaugeInHistoricalSyncName)
+	gaugeInHistoricalSync       = prometheus.NewDesc(
+		gaugeInHistoricalSyncFQName,
+		inHistoricalSyncEnumGauge.Describe(),
 		[]string{"group_name", "name"},
 		prometheus.Labels{})
-	gaugeInfoDesc = prometheus.NewDesc(
-		prometheus.BuildFQName(namespace, subsystem, gaugeInfoName),
-		"Information about a connector",
+	gaugeInfoFQName = prometheus.BuildFQName(namespace, subsystem, gaugeInfoName)
+	gaugeInfo       = prometheus.NewDesc(
+		gaugeInfoFQName,
+		infoEnumGauge.Describe(),
 		[]string{"group_name", "group_id", "name", "id", "service"},
 		prometheus.Labels{})
 )
 
-type ConnectorCollector struct {
+type Collector struct {
 	Listers []connector.Lister
 
 	counterErrorsTotal *prometheus.CounterVec
 	collectFuncs       []collectFunc
+	logger             *zap.SugaredLogger
 }
 
-func NewConnectorCollector(listers []connector.Lister) (*ConnectorCollector, error) {
+func NewCollector(logger *zap.SugaredLogger, listers []connector.Lister) (*Collector, error) {
+	logger = getComponentLogger(logger, "collector")
+
 	counterErrorsTotal := prometheus.NewCounterVec(prometheus.CounterOpts{
 		Namespace: namespace,
 		Subsystem: subsystem,
@@ -103,9 +115,10 @@ func NewConnectorCollector(listers []connector.Lister) (*ConnectorCollector, err
 		counterErrorsTotal.WithLabelValues(lister.GetGroupName()).Add(0)
 	}
 
-	collector := &ConnectorCollector{
+	collector := &Collector{
 		Listers:            listers,
 		counterErrorsTotal: counterErrorsTotal,
+		logger:             logger,
 	}
 
 	collectFuncs := []collectFunc{
@@ -124,11 +137,11 @@ func NewConnectorCollector(listers []connector.Lister) (*ConnectorCollector, err
 	return collector, nil
 }
 
-func (c *ConnectorCollector) Describe(descsChan chan<- *prometheus.Desc) {
+func (c *Collector) Describe(descsChan chan<- *prometheus.Desc) {
 	prometheus.DescribeByCollect(c, descsChan)
 }
 
-func (c *ConnectorCollector) Collect(metricsChan chan<- prometheus.Metric) {
+func (c *Collector) Collect(metricsChan chan<- prometheus.Metric) {
 	waitGroup := new(sync.WaitGroup)
 	waitGroup.Add(len(c.Listers))
 	for _, lister := range c.Listers {
@@ -137,7 +150,7 @@ func (c *ConnectorCollector) Collect(metricsChan chan<- prometheus.Metric) {
 	waitGroup.Wait()
 }
 
-func (c *ConnectorCollector) collectForLister(lister connector.Lister,
+func (c *Collector) collectForLister(lister connector.Lister,
 	metricsChan chan<- prometheus.Metric,
 	waitGroup *sync.WaitGroup) {
 	defer waitGroup.Done()
@@ -148,41 +161,48 @@ func (c *ConnectorCollector) collectForLister(lister connector.Lister,
 		// (it is a metric _belonging_ to this collector, rather than _collected_)
 		c.counterErrorsTotal.WithLabelValues(
 			lister.GetGroupName()).Inc() // `group_name` label
-		log.Printf("Error listing connectors: %v", err) // TODO: Use logger
+		c.logger.Errorw("listing connectors", "group_name", lister.GetGroupName(), "error", err)
 		return
 	}
 
 	collectFuncWaitGroup := new(sync.WaitGroup)
-	waitGroup.Add(len(c.collectFuncs))
+	collectFuncWaitGroup.Add(len(c.collectFuncs))
 	for _, collectFunc := range c.collectFuncs {
-		go collectFunc(connectors, metricsChan, waitGroup)
+		go collectFunc(connectors, metricsChan, collectFuncWaitGroup)
+		// TODO: Handle errors and increment error counter.
+		// Currently the collectFuncs do not return an error, as
+		// we trust that the data they work on is 100% legit, as
+		// it was sanity-checked by the lister already
 	}
 	collectFuncWaitGroup.Wait()
-
-	// TODO: Handle errors and increment error counter
 }
 
-func (c *ConnectorCollector) collectPaused(connectors []*connector.Connector,
+func (c *Collector) collectPaused(connectors []*connector.Connector,
 	metricsChan chan<- prometheus.Metric,
 	waitGroup *sync.WaitGroup) {
 	defer waitGroup.Done()
 
 	// Create one gauge metric per connector
 	for _, conn := range connectors {
-		value := pausedGaugeValueFalse
+		value := metrics.EnumGaugeValueFalse
 		if conn.Paused {
-			value = pausedGaugeValueTrue
+			value = metrics.EnumGaugeValueTrue
 		}
 
 		metricsChan <- prometheus.MustNewConstMetric(gaugePausedDesc,
 			prometheus.GaugeValue,
-			float64(value),
+			value.GaugeValue(),
 			conn.GroupName, // `group_name` label
 			conn.Name)      // `name` label
+
+		c.logger.Infow("collected metric",
+			"group_name", conn.GroupName,
+			"name", conn.Name,
+			"metric", gaugePausedFQName)
 	}
 }
 
-func (c *ConnectorCollector) collectSetupState(connectors []*connector.Connector,
+func (c *Collector) collectSetupState(connectors []*connector.Connector,
 	metricsChan chan<- prometheus.Metric,
 	waitGroup *sync.WaitGroup) {
 	defer waitGroup.Done()
@@ -199,13 +219,18 @@ func (c *ConnectorCollector) collectSetupState(connectors []*connector.Connector
 
 		metricsChan <- prometheus.MustNewConstMetric(gaugeSetupStateDesc,
 			prometheus.GaugeValue,
-			float64(value),
+			value.GaugeValue(),
 			conn.GroupName, // `group_name` label
 			conn.Name)      // `name` label
+
+		c.logger.Infow("collected metric",
+			"group_name", conn.GroupName,
+			"name", conn.Name,
+			"metric", gaugeSetupStateFQName)
 	}
 }
 
-func (c *ConnectorCollector) collectSyncState(connectors []*connector.Connector,
+func (c *Collector) collectSyncState(connectors []*connector.Connector,
 	metricsChan chan<- prometheus.Metric,
 	waitGroup *sync.WaitGroup) {
 	defer waitGroup.Done()
@@ -224,13 +249,18 @@ func (c *ConnectorCollector) collectSyncState(connectors []*connector.Connector,
 
 		metricsChan <- prometheus.MustNewConstMetric(gaugeSyncStateDesc,
 			prometheus.GaugeValue,
-			float64(value),
+			value.GaugeValue(),
 			conn.GroupName, // `group_name` label
 			conn.Name)      // `name` label
+
+		c.logger.Infow("collected metric",
+			"group_name", conn.GroupName,
+			"name", conn.Name,
+			"metric", gaugeSyncStateFQName)
 	}
 }
 
-func (c *ConnectorCollector) collectUpdateState(connectors []*connector.Connector,
+func (c *Collector) collectUpdateState(connectors []*connector.Connector,
 	metricsChan chan<- prometheus.Metric,
 	waitGroup *sync.WaitGroup) {
 	defer waitGroup.Done()
@@ -244,31 +274,44 @@ func (c *ConnectorCollector) collectUpdateState(connectors []*connector.Connecto
 
 		metricsChan <- prometheus.MustNewConstMetric(gaugeUpdateStateDesc,
 			prometheus.GaugeValue,
-			float64(value),
+			value.GaugeValue(),
 			conn.GroupName, // `group_name` label
 			conn.Name)      // `name` label
+
+		c.logger.Infow("collected metric",
+			"group_name", conn.GroupName,
+			"name", conn.Name,
+			"metric", gaugeUpdateStateFQName)
 	}
 }
 
-func (c *ConnectorCollector) collectInfo(connectors []*connector.Connector,
+func (c *Collector) collectInfo(connectors []*connector.Connector,
 	metricsChan chan<- prometheus.Metric,
 	waitGroup *sync.WaitGroup) {
 	defer waitGroup.Done()
 
 	// Create one gauge metric per connector
 	for _, conn := range connectors {
-		metricsChan <- prometheus.MustNewConstMetric(gaugeInfoDesc,
+		metricsChan <- prometheus.MustNewConstMetric(gaugeInfo,
 			prometheus.GaugeValue,
-			float64(infoGaugeValuePresent),
+			metrics.EnumGaugeValuePresent.GaugeValue(),
 			conn.GroupName, // `group_name` label
 			conn.GroupID,   // `group_id` label
 			conn.Name,      // `name` label
 			conn.ID,        // `id` label
 			conn.Service)   // `service` label
+
+		c.logger.Infow("collected metric",
+			"group_name", conn.GroupName,
+			"group_id", conn.GroupID,
+			"name", conn.Name,
+			"id", conn.ID,
+			"service", conn.Service,
+			"metric", gaugeInfoFQName)
 	}
 }
 
-func (c *ConnectorCollector) collectSyncFrequency(connectors []*connector.Connector,
+func (c *Collector) collectSyncFrequency(connectors []*connector.Connector,
 	metricsChan chan<- prometheus.Metric,
 	waitGroup *sync.WaitGroup) {
 	defer waitGroup.Done()
@@ -280,10 +323,15 @@ func (c *ConnectorCollector) collectSyncFrequency(connectors []*connector.Connec
 			float64(conn.SyncFrequencyMins*60), // Convert to seconds
 			conn.GroupName,                     // `group_name` label
 			conn.Name)                          // `name` label
+
+		c.logger.Infow("collected metric",
+			"group_name", conn.GroupName,
+			"name", conn.Name,
+			"metric", gaugeSyncFrequencyFQName)
 	}
 }
 
-func (c *ConnectorCollector) collectWarningCount(connectors []*connector.Connector,
+func (c *Collector) collectWarningCount(connectors []*connector.Connector,
 	metricsChan chan<- prometheus.Metric,
 	waitGroup *sync.WaitGroup) {
 	defer waitGroup.Done()
@@ -295,10 +343,15 @@ func (c *ConnectorCollector) collectWarningCount(connectors []*connector.Connect
 			float64(conn.WarningCount),
 			conn.GroupName, // `group_name` label
 			conn.Name)      // `name` label
+
+		c.logger.Infow("collected metric",
+			"group_name", conn.GroupName,
+			"name", conn.Name,
+			"metric", gaugeWarningCountFQName)
 	}
 }
 
-func (c *ConnectorCollector) collectTaskCount(connectors []*connector.Connector,
+func (c *Collector) collectTaskCount(connectors []*connector.Connector,
 	metricsChan chan<- prometheus.Metric,
 	waitGroup *sync.WaitGroup) {
 	defer waitGroup.Done()
@@ -310,25 +363,35 @@ func (c *ConnectorCollector) collectTaskCount(connectors []*connector.Connector,
 			float64(conn.TaskCount),
 			conn.GroupName, // `group_name` label
 			conn.Name)      // `name` label
+
+		c.logger.Infow("collected metric",
+			"group_name", conn.GroupName,
+			"name", conn.Name,
+			"metric", gaugeTaskCountFQName)
 	}
 }
 
-func (c *ConnectorCollector) collectInHistoricalSync(connectors []*connector.Connector,
+func (c *Collector) collectInHistoricalSync(connectors []*connector.Connector,
 	metricsChan chan<- prometheus.Metric,
 	waitGroup *sync.WaitGroup) {
 	defer waitGroup.Done()
 
 	// Create one gauge metric per connector
 	for _, conn := range connectors {
-		value := inHistoricalSyncGaugeValueFalse
+		value := metrics.EnumGaugeValueFalse
 		if conn.Paused {
-			value = inHistoricalSyncGaugeValueTrue
+			value = metrics.EnumGaugeValueTrue
 		}
 
 		metricsChan <- prometheus.MustNewConstMetric(gaugeInHistoricalSync,
 			prometheus.GaugeValue,
-			float64(value),
+			value.GaugeValue(),
 			conn.GroupName, // `group_name` label
 			conn.Name)      // `name` label
+
+		c.logger.Infow("collected metric",
+			"group_name", conn.GroupName,
+			"name", conn.Name,
+			"metric", gaugeInHistoricalSyncFQName)
 	}
 }
